@@ -32,7 +32,6 @@ Here is a list of dependencies and binaries required for this application.
 4. Setup KeyDB
 5. Setup Utilities for Sending Email
 6. Create UserAccountsResolver in GraphQL
-7. Swap ExpressJS with NodeJS/Bun HTTP Module
 
 ### 1. Create new Project & Install dependencies.
 
@@ -166,24 +165,30 @@ export const environ = {
 } as const;
 ```
 
-6. Create `.env` files. Here are contents of all 3 files, (.env.sample, .env.development, .env.production)
+6. Create `.env` files. Here are contents of all 2 files out of 3 files, (.env.sample, .env.development, .env.production)
 
 ```text
 # .env.sample
 HOST=127.0.0.1
 PORT=4000
 DB_URL="postgres://<username>:<password>@localhost:5432/<database-name>"
-
+REDIS_URL="redis://<username>:<password>@localhost:6379/<database-name>"
+SMTP_HOST="smtp.ethereal.email"
+SMTP_USERNAME="amelie.beer@ethereal.email"
+SMTP_PASSWORD="PhPupn9RvDySGn4PQK"
+SMTP_FROM="Authentication <no-reply@example.com>"
+SMTP_SECURE=1
 
 # .env.development
-HOST=127.0.0.1
+HOST=0.0.0.0
 PORT=4000
 DB_URL="postgres://postgres:testpassword@localhost:5432/authentication"
-
-# .env.production (change contents accordingly of this file.)
-HOST=127.0.0.1
-PORT=4000
-DB_URL="postgres://postgres:testpassword@localhost:5432/authentication"
+REDIS_URL="redis://localhost:6379/authentication"
+SMTP_HOST="smtp.ethereal.email"
+SMTP_USERNAME="amelie.beer@ethereal.email"
+SMTP_PASSWORD="PhPupn9RvDySGn4PQK"
+SMTP_FROM="Authentication <no-reply@example.com>"
+SMTP_SECURE=1
 ```
 
 6. Here are contents of `.gitignore` file incase you need to omit .env files (Optional)
@@ -360,4 +365,86 @@ export class HealthResolver {
 
 KeyDB is compatible with Redis, so any redis client package will work with KeyDB as per the [documentation](https://docs.keydb.dev/docs/compatibility). We will use ioredis client to interact with keydb server. And for this project, we will start a docker container of keydb just to build our application. You should swap Docker container KeyDB URL with your production server URL, when running your app in production.
 
-1.
+1. Start KeyDB database server container
+
+```shell
+docker run --name some-keydb -d --network=host eqalpha/keydb keydb-server
+```
+
+2. Create a new file at `src/db/redis.ts` with following contents:
+
+```typescript
+import Redis from "ioredis";
+import { environ } from "../common/env";
+
+export const redisClient = new Redis(environ.REDIS_URL);
+```
+
+3. Update `src/common/env.ts` file to contain REDIS_URL configuration
+
+```typescript
+export const environ = {
+  HOST: process.env.HOST || "127.0.0.1",
+  PORT: Number(process.env.PORT) || 4000,
+  DB_URL: process.env.DB_URL!,
+  REDIS_URL: process.env.REDIS_URL!, // <- add this line
+} as const;
+```
+
+### 5. Setup Utilities for Sending Email
+
+1. Update contents of `src/common.env.ts` as follows:
+
+```typescript
+export const environ = {
+  HOST: process.env.HOST || "127.0.0.1",
+  PORT: Number(process.env.PORT) || 4000,
+  DB_URL: process.env.DB_URL!,
+  REDIS_URL: process.env.REDIS_URL!,
+
+  // Related to Email <- add this section
+  SMTP_HOST: process.env.SMTP_HOST!,
+  SMTP_USERNAME: process.env.SMTP_USERNAME!,
+  SMTP_PASSWORD: process.env.SMTP_PASSWORD!,
+  SMTP_FROM: process.env.SMTP_FROM!,
+  SMTP_SECURE: !!process.env.SMTP_SECURE!,
+} as const;
+```
+
+2. Create a file at `src/common/sendEmail.ts` with following contents:
+
+```typescript
+import { SMTPClient, type MessageAttachment } from "emailjs";
+import { environ } from "./env";
+
+const client = new SMTPClient({
+  host: environ.SMTP_HOST,
+  user: environ.SMTP_USERNAME,
+  password: environ.SMTP_PASSWORD,
+  ssl: environ.SMTP_SECURE,
+});
+
+export interface ISendEmailOptions {
+  from?: string | string[];
+  cc?: string | string[];
+  bcc?: string | string[];
+  attachment?: MessageAttachment | MessageAttachment[];
+  to: string | string[];
+  subject: string;
+  content: string | null;
+}
+
+export const sendEmail = async (options: ISendEmailOptions): Promise<void> => {
+  await client.sendAsync({
+    from: options.from || environ.SMTP_FROM,
+    cc: options.cc,
+    bcc: options.bcc,
+    attachment: options.attachment,
+    to: options.to,
+    subject: options.subject,
+    text: options.content,
+  });
+};
+```
+
+### 6. Create UserAccountsResolver in GraphQL
