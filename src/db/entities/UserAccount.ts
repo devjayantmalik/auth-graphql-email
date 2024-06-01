@@ -1,38 +1,39 @@
+import { Field, ID, ObjectType } from "type-graphql";
 import {
-  Entity,
-  PrimaryGeneratedColumn,
+  BaseEntity,
   Column,
   CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
   UpdateDateColumn,
-  BeforeInsert,
 } from "typeorm";
-import argon2 from "argon2";
 
+@ObjectType()
 @Entity({ name: "user_accounts" })
-export class UserAccount {
+export class UserAccount extends BaseEntity {
+  @Field(() => ID)
   @PrimaryGeneratedColumn("identity", { name: "id" })
   id: number;
 
+  @Field(() => String, { name: "full_name" })
   @Column({ name: "full_name", length: 50 })
   full_name: string;
 
-  @Column({ name: "email", length: 50 })
+  @Field(() => String, { name: "email" })
+  @Column({ name: "email", length: 50, unique: true })
   email: string;
 
-  @Column({ type: "text" })
+  @Column({ name: "password", type: "text" })
   password: string;
 
-  @Column({ type: "timestamptz", nullable: true, default: null })
+  @Column({ name: "account_activated_at", type: "timestamp", nullable: true, default: null })
   account_activated_at?: Date;
 
-  @CreateDateColumn()
+  @Field(() => Date)
+  @CreateDateColumn({ name: "created_at" })
   created_at: Date;
 
-  @UpdateDateColumn()
+  @Field(() => Date)
+  @UpdateDateColumn({ name: "updated_at" })
   updated_at: Date;
-
-  @BeforeInsert()
-  async hashPassword() {
-    this.password = await argon2.hash(this.password);
-  }
 }

@@ -6,6 +6,7 @@ export const environ = {
 
   // Related to Email
   SMTP_HOST: process.env.SMTP_HOST!,
+  SMTP_PORT: Number(process.env.SMTP_PORT!) || 587,
   SMTP_USERNAME: process.env.SMTP_USERNAME!,
   SMTP_PASSWORD: process.env.SMTP_PASSWORD!,
   SMTP_FROM: process.env.SMTP_FROM!,
