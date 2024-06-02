@@ -739,6 +739,16 @@ export class EmailQueue extends BaseEntity {
 
 ```typescript
 export class DateTime extends Date {
+  addMinutes(minutes: number): DateTime {
+    this.setMinutes(this.getMinutes() + minutes);
+    return this;
+  }
+
+  addHours(hours: number): DateTime {
+    this.setHours(this.getHours() + hours);
+    return this;
+  }
+
   subtractMinutes(minutes: number): DateTime {
     this.setMinutes(this.getMinutes() + minutes);
     return this;
@@ -851,3 +861,151 @@ export const AllResolvers: NonEmptyArray<Function> = [
   ActivateUserAccountResolver, // <- add this line.
 ];
 ```
+
+##### 3. Login to existing account
+
+1. Create new file at `src/resolvers/accounts/dto/AuthenticateInput.ts` with following contents:
+
+```typescript
+import { IsEmail, Length } from "class-validator";
+import { Field, InputType } from "type-graphql";
+
+@InputType()
+export class AuthenticateInput {
+  @IsEmail({}, { message: "Invalid email provided." })
+  @Field(() => String, { name: "email" })
+  email: string;
+
+  @Length(6, 30, { message: "Invalid password provided." })
+  @Field(() => String, { name: "password" })
+  password: string;
+}
+```
+
+2. Edit `src/db/entities/UserAccount.ts` to include auth_token and auth_token_expires_at fields as follows:
+
+```typescript
+import { Field, ID, ObjectType } from "type-graphql";
+import {
+  BaseEntity,
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from "typeorm";
+
+@ObjectType()
+@Entity({ name: "user_accounts" })
+export class UserAccount extends BaseEntity {
+  @Field(() => ID)
+  @PrimaryGeneratedColumn("identity", { name: "id" })
+  id: number;
+
+  @Field(() => String, { name: "full_name" })
+  @Column({ name: "full_name", length: 50 })
+  full_name: string;
+
+  @Field(() => String, { name: "email" })
+  @Column({ name: "email", length: 50, unique: true })
+  email: string;
+
+  @Column({ name: "password", type: "text" })
+  password: string;
+
+  @Column({ name: "account_activated_at", type: "timestamp", nullable: true, default: null })
+  account_activated_at?: Date;
+
+  // <-- add this property
+  @Column({ name: "auth_token", length: 10, default: "" })
+  auth_token: string;
+
+  // <-- add this property
+  @Column({ name: "auth_token_expires_at", type: "timestamp", default: "now()" })
+  auth_token_expires_at: Date;
+
+  @Field(() => Date)
+  @CreateDateColumn({ name: "created_at" })
+  created_at: Date;
+
+  @Field(() => Date)
+  @UpdateDateColumn({ name: "updated_at" })
+  updated_at: Date;
+}
+```
+
+3. Create new file `src/common/Random.ts` with following contents:
+
+```typescript
+import { customAlphabet } from "nanoid";
+
+const alphabets = "ABCDEFGHIJLKMNOPQRSTUVWXYZ";
+const numbers = "0123456789";
+const authTokenCode = customAlphabet(alphabets.toUpperCase() + alphabets.toLowerCase() + numbers);
+
+export const Random = {
+  createAuthToken(): string {
+    return authTokenCode(10);
+  },
+};
+```
+
+3. Create new file at `src/resolvers/accounts/AuthenticateResolver.ts` with following contents:
+
+```typescript
+import argon2 from "argon2";
+import { Arg, Mutation, Resolver } from "type-graphql";
+import { DateTime } from "../../common/DateTime";
+import { Random } from "../../common/Random";
+import { UserAccount } from "../../db/entities/UserAccount";
+import { AuthenticateInput } from "./dto/AuthenticateInput";
+
+@Resolver()
+export class AuthenticateResolver {
+  @Mutation(() => UserAccount, {
+    name: "authenticate",
+    description: "Checks accounts credentials and returns auth token.",
+  })
+  async authenticate(
+    @Arg("data", () => AuthenticateInput) data: AuthenticateInput,
+  ): Promise<UserAccount> {
+    // check if user account already exists with provided email
+    const exists = await UserAccount.findOne({ where: { email: data.email } });
+    if (!exists) throw new Error("Invalid credentials provided.");
+
+    // check password
+    if (!(await argon2.verify(exists.password, data.password)))
+      throw new Error("Invalid credentials provided.");
+
+    // update auth token
+    exists.auth_token = Random.createAuthToken();
+    exists.auth_token_expires_at = new DateTime().addHours(2);
+    const updated = await exists.save();
+
+    return updated;
+  }
+}
+```
+
+4. Add Authenticate resolver to available to list of resolvers. Edit `src/resolvers/index.ts` with below contents:
+
+```typescript
+import type { NonEmptyArray } from "type-graphql";
+import { HealthResolver } from "./HealthResolver";
+import { CreateNewAccountResolver } from "./accounts/CreateNewAccountResolver";
+import { ActivateUserAccountResolver } from "./accounts/ActivateUserAccountResolver";
+import { AuthenticateResolver } from "./accounts/AuthenticateResolver"; // <-- add this line
+
+export const AllResolvers: NonEmptyArray<Function> = [
+  HealthResolver,
+  CreateNewAccountResolver,
+  ActivateUserAccountResolver,
+  AuthenticateResolver, // <-- add this line
+];
+```
+
+##### 4. Reset Password (Send Reset Password Email)
+
+##### 5. Update Password (Updates existing password with new one.)
+
+##### 6. Get Current Logged in User
