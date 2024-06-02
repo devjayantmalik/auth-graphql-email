@@ -5,6 +5,7 @@ import { AuthenticateResolver } from "./accounts/AuthenticateResolver";
 import { CreateNewAccountResolver } from "./accounts/CreateNewAccountResolver";
 import { ResetPasswordResolver } from "./accounts/ResetPasswordResolver";
 import { UpdatePasswordResolver } from "./accounts/UpdatePasswordResolver";
+import { WhoamiResolver } from "./accounts/WhoamiResolver";
 
 export const AllResolvers: NonEmptyArray<Function> = [
   HealthResolver,
@@ -13,4 +14,5 @@ export const AllResolvers: NonEmptyArray<Function> = [
   AuthenticateResolver,
   ResetPasswordResolver,
   UpdatePasswordResolver,
+  WhoamiResolver,
 ];
