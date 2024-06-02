@@ -8,6 +8,11 @@ import {
   UpdateDateColumn,
 } from "typeorm";
 
+export enum UserAccountRole {
+  Admin = "admin",
+  Client = "client",
+}
+
 @ObjectType()
 @Entity({ name: "user_accounts" })
 export class UserAccount extends BaseEntity {
@@ -25,6 +30,15 @@ export class UserAccount extends BaseEntity {
 
   @Column({ name: "password", type: "text" })
   password: string;
+
+  @Column({
+    name: "role",
+    type: "enum",
+    enum: UserAccountRole,
+    enumName: "user_account_role",
+    default: UserAccountRole.Client,
+  })
+  role: UserAccountRole;
 
   @Column({ name: "account_activated_at", type: "timestamp", nullable: true, default: null })
   account_activated_at?: Date;

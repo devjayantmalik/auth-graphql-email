@@ -5,6 +5,7 @@ import { environ } from "./common/env";
 import { buildSchema } from "type-graphql";
 import { AllResolvers } from "./resolvers";
 import { sendScheduledEmails } from "./common/sendEmail";
+import { authChecker } from "./middlewares/authChecker";
 
 const main = async (): Promise<void> => {
   // initialise database
@@ -12,7 +13,7 @@ const main = async (): Promise<void> => {
 
   // configure and add graphql server as middleware
   const yoga = createYoga({
-    schema: await buildSchema({ resolvers: AllResolvers }),
+    schema: await buildSchema({ resolvers: AllResolvers, authChecker: authChecker }),
     graphiql: {
       credentials: "include",
     },

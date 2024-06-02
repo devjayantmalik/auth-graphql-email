@@ -32,6 +32,8 @@ Here is a list of dependencies and binaries required for this application.
 4. Setup KeyDB
 5. Setup Utilities for Sending Email
 6. Create UserAccountsResolver in GraphQL
+7. Create Authorization Guard for GraphQL-Yoga server
+8. Create DemoResolver to demonstrate Authentication & Authorization
 
 ### 1. Create new Project & Install dependencies.
 
@@ -1281,5 +1283,247 @@ export const AllResolvers: NonEmptyArray<Function> = [
   ResetPasswordResolver,
   UpdatePasswordResolver,
   WhoamiResolver, // <-- add this line
+];
+```
+
+### 7. Create Authorization Guard for GraphQL-Yoga server
+
+1. Edit `src/db/entities/UserAccount.ts` to include role field.
+
+```typescript
+import { Field, ID, ObjectType } from "type-graphql";
+import {
+  BaseEntity,
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from "typeorm";
+
+export enum UserAccountRole {
+  Admin = "admin",
+  Client = "client",
+}
+
+@ObjectType()
+@Entity({ name: "user_accounts" })
+export class UserAccount extends BaseEntity {
+  @Field(() => ID)
+  @PrimaryGeneratedColumn("identity", { name: "id" })
+  id: number;
+
+  @Field(() => String, { name: "full_name" })
+  @Column({ name: "full_name", length: 50 })
+  full_name: string;
+
+  @Field(() => String, { name: "email" })
+  @Column({ name: "email", length: 50, unique: true })
+  email: string;
+
+  @Column({ name: "password", type: "text" })
+  password: string;
+
+  @Column({
+    name: "role",
+    type: "enum",
+    enum: UserAccountRole,
+    enumName: "user_account_role",
+    default: UserAccountRole.Client,
+  })
+  role: UserAccountRole;
+
+  @Column({ name: "account_activated_at", type: "timestamp", nullable: true, default: null })
+  account_activated_at?: Date;
+
+  @Field(() => String, { name: "auth_token" })
+  @Column({ name: "auth_token", length: 10, default: "" })
+  auth_token: string;
+
+  @Column({ name: "auth_token_expires_at", type: "timestamp", default: "now()" })
+  auth_token_expires_at: Date;
+
+  @Field(() => Date)
+  @CreateDateColumn({ name: "created_at" })
+  created_at: Date;
+
+  @Field(() => Date)
+  @UpdateDateColumn({ name: "updated_at" })
+  updated_at: Date;
+}
+```
+
+2. Edit `src/middlewares/authChecker.ts` with below contents:
+
+```typescript
+import type { YogaInitialContext } from "graphql-yoga";
+import type { AuthChecker } from "type-graphql";
+import { UserAccount, type UserAccountRole } from "../db/entities/UserAccount";
+
+export const authChecker: AuthChecker<YogaInitialContext, UserAccountRole> = async (
+  { context },
+  roles,
+) => {
+  const auth_token = context.request.headers.get("authorization");
+  if (!auth_token) return false;
+
+  // validate auth token
+  const account = await UserAccount.findOne({ where: { auth_token: auth_token } });
+  if (!account) return false;
+
+  // check user role incase role is specified
+  if (!!roles.length && !roles.includes(account.role)) return false;
+
+  return true;
+};
+```
+
+3. Edit `src/index.ts` to include authChecker with below contents:
+
+```typescript
+import "reflect-metadata";
+import { MainDataSource } from "./db/data-source";
+import { createYoga } from "graphql-yoga";
+import { environ } from "./common/env";
+import { buildSchema } from "type-graphql";
+import { AllResolvers } from "./resolvers";
+import { sendScheduledEmails } from "./common/sendEmail";
+import { authChecker } from "./middlewares/authChecker";
+
+const main = async (): Promise<void> => {
+  // initialise database
+  await MainDataSource.initialize();
+
+  // configure and add graphql server as middleware
+  const yoga = createYoga({
+    schema: await buildSchema({ resolvers: AllResolvers, authChecker: authChecker }),
+    graphiql: {
+      credentials: "include",
+    },
+    graphqlEndpoint: "/graphql",
+    landingPage: false,
+  });
+
+  Bun.serve({ fetch: yoga, hostname: environ.HOST, port: environ.PORT });
+  console.log(`Server started at: http://${environ.HOST}:${environ.PORT}`);
+
+  // Send scheduled emails regularly. You can create seperate processes incase, you need to scale horizontally.
+  setInterval(async () => {
+    await sendScheduledEmails();
+  }, 10_000);
+};
+main().catch(console.error);
+```
+
+4. Edit `src/resolvers/WhoamiResolver.ts` with below contents to mark whoami resolver with isAuthenticated Resolver
+
+```typescript
+import type { YogaInitialContext } from "graphql-yoga";
+import { Ctx, Query, Resolver, Authorized } from "type-graphql";
+import { DateTime } from "../../common/DateTime";
+import { UserAccount } from "../../db/entities/UserAccount";
+
+@Resolver()
+export class WhoamiResolver {
+  @Authorized()
+  @Query(() => UserAccount, {
+    name: "whoami",
+    description: "Returns currently authenticated user based on Authorization header.",
+    nullable: true,
+  })
+  async whoami(@Ctx() context: YogaInitialContext): Promise<UserAccount | null> {
+    const token = context.request.headers.get("authorization");
+    if (!token) return null;
+
+    // check if auth_token is valid
+    const account = await UserAccount.findOne({ where: { auth_token: token } });
+    if (!account || account.auth_token_expires_at.getTime() <= new DateTime().getTime()) {
+      return null;
+    }
+
+    // return account otherwise
+    return account;
+  }
+}
+```
+
+### 8. Create DemoResolver to demonstrate Authentication & Authorization
+
+1. Create new file at `src/resolvers/demo/DemoResolver.ts` with below contents to check authentication and authorization
+
+```typescript
+import { Authorized, Query, Resolver } from "type-graphql";
+import { UserAccountRole } from "../../db/entities/UserAccount";
+
+@Resolver()
+export class DemoResolver {
+  @Query(() => Boolean, {
+    name: "demo_public",
+    description: "Returns true, irrespective of authentication or unauthenticated.",
+  })
+  demo_public(): boolean {
+    return true;
+  }
+
+  @Authorized()
+  @Query(() => Boolean, {
+    name: "demo_authenticated",
+    description: "Returns true, incase you are authenticated.",
+  })
+  demo_authenticated(): boolean {
+    return true;
+  }
+
+  @Authorized(UserAccountRole.Admin)
+  @Query(() => Boolean, {
+    name: "demo_admin",
+    description: "Returns true, only if you are authenticated and role is admin.",
+  })
+  demo_admin(): boolean {
+    return true;
+  }
+
+  @Authorized(UserAccountRole.Client)
+  @Query(() => Boolean, {
+    name: "demo_client",
+    description: "Returns true, only if you are authenticated and role is client.",
+  })
+  demo_client(): boolean {
+    return true;
+  }
+
+  @Authorized(UserAccountRole.Admin, UserAccountRole.Client)
+  @Query(() => Boolean, {
+    name: "demo_admin_or_client",
+    description: "Returns true, only if you are authenticated and role is either admin or client.",
+  })
+  demo_admin_or_client(): boolean {
+    return true;
+  }
+}
+```
+
+2. Add Demo Resolver to list of resolvers. Edit `src/resolvers/index.ts` file with below contents:
+
+```typescript
+import type { NonEmptyArray } from "type-graphql";
+import { HealthResolver } from "./HealthResolver";
+import { ActivateUserAccountResolver } from "./accounts/ActivateUserAccountResolver";
+import { AuthenticateResolver } from "./accounts/AuthenticateResolver";
+import { CreateNewAccountResolver } from "./accounts/CreateNewAccountResolver";
+import { ResetPasswordResolver } from "./accounts/ResetPasswordResolver";
+import { UpdatePasswordResolver } from "./accounts/UpdatePasswordResolver";
+import { WhoamiResolver } from "./accounts/WhoamiResolver";
+import { DemoResolver } from "./demo/DemoResolver";
+
+export const AllResolvers: NonEmptyArray<Function> = [
+  HealthResolver,
+  CreateNewAccountResolver,
+  ActivateUserAccountResolver,
+  AuthenticateResolver,
+  ResetPasswordResolver,
+  UpdatePasswordResolver,
+  WhoamiResolver,
+  DemoResolver,
 ];
 ```
