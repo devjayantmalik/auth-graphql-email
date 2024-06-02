@@ -1141,4 +1141,91 @@ export const AllResolvers: NonEmptyArray<Function> = [
 
 ##### 5. Update Password (Updates existing password with new one.)
 
+1. Create new file at: `src/resolvers/accounts/dto/UpdatePasswordInput.ts` with below contents:
+
+```typescript
+import { IsEmail, Length } from "class-validator";
+import { Field, InputType } from "type-graphql";
+
+@InputType()
+export class UpdatePasswordInput {
+  @IsEmail({}, { message: "Invalid email provided." })
+  @Field(() => String, { name: "email" })
+  email: string;
+
+  @Length(6, 10, { message: "Invalid verification code" })
+  @Field(() => String, { name: "verification_code" })
+  verification_code: string;
+
+  @Length(6, 30, { message: "Password must contain atleast 6 and atmost 30 characters" })
+  @Field(() => String, {
+    name: "password",
+    description: "Updated password to set on user account.",
+  })
+  password: string;
+}
+```
+
+2. Create new file at `src/resolvers/accounts/UpdatePasswordResolver.ts` with below contents:
+
+```typescript
+import argon2 from "argon2";
+import { Arg, Mutation, Resolver } from "type-graphql";
+import { DateTime } from "../../common/DateTime";
+import { UserAccount } from "../../db/entities/UserAccount";
+import { redisClient } from "../../db/redis";
+import { UpdatePasswordInput } from "./dto/UpdatePasswordInput";
+
+@Resolver()
+export class UpdatePasswordResolver {
+  @Mutation(() => Boolean, {
+    name: "update_password",
+    description: "Updates password for a user account with email and verification code",
+  })
+  async update_password(
+    @Arg("data", () => UpdatePasswordInput) data: UpdatePasswordInput,
+  ): Promise<Boolean> {
+    // check if user account already exists with provided email
+    const exists = await UserAccount.findOne({ where: { email: data.email } });
+    if (!exists) return true;
+
+    // check if activation code is valid
+    const isValid = await redisClient.isResetPasswordCodeValid(
+      exists.email,
+      data.verification_code,
+    );
+    if (!isValid) throw new Error("Invalid activation code provided.");
+
+    // update password for valid activation code
+    await UserAccount.update(
+      { id: exists.id },
+      { password: await argon2.hash(data.password), auth_token_expires_at: new DateTime() },
+    );
+
+    return true;
+  }
+}
+```
+
+3. Add Resolver to resolvers list. Edit `src/resolvers/index.ts` with below contents:
+
+```typescript
+import type { NonEmptyArray } from "type-graphql";
+import { HealthResolver } from "./HealthResolver";
+import { ActivateUserAccountResolver } from "./accounts/ActivateUserAccountResolver";
+import { AuthenticateResolver } from "./accounts/AuthenticateResolver";
+import { CreateNewAccountResolver } from "./accounts/CreateNewAccountResolver";
+import { ResetPasswordResolver } from "./accounts/ResetPasswordResolver";
+import { UpdatePasswordResolver } from "./accounts/UpdatePasswordResolver";
+
+export const AllResolvers: NonEmptyArray<Function> = [
+  HealthResolver,
+  CreateNewAccountResolver,
+  ActivateUserAccountResolver,
+  AuthenticateResolver,
+  ResetPasswordResolver,
+  UpdatePasswordResolver, // <-- add this line.
+];
+```
+
 ##### 6. Get Current Logged in User
