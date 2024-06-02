@@ -784,3 +784,70 @@ main().catch(console.error);
 ```
 
 #### 2. Activate Account Resolver
+
+1. Create a new file at `src/resolvers/accounts/dto/ActivateUserAccountInput.ts` with following contents:
+
+```typescript
+import { IsEmail, Length } from "class-validator";
+import { Field, InputType } from "type-graphql";
+
+@InputType()
+export class ActivateUserAccountInput {
+  @IsEmail({}, { message: "Invalid email provided." })
+  @Field(() => String, { name: "email" })
+  email: string;
+
+  @Length(4, 10, { message: "Invalid activation code" })
+  @Field(() => String, { name: "activation_code" })
+  activation_code: string;
+}
+```
+
+2. Create new Resolver for activate user account at `src/resolvers/accounts/ActivateUserAccountResolver.ts` with following contents:
+
+```typescript
+import { Arg, Mutation, Resolver } from "type-graphql";
+import { DateTime } from "../../common/DateTime";
+import { UserAccount } from "../../db/entities/UserAccount";
+import { redisClient } from "../../db/redis";
+import { ActivateUserAccountInput } from "./dto/ActivateUserAccountInput";
+
+@Resolver()
+export class ActivateUserAccountResolver {
+  @Mutation(() => Boolean, {
+    name: "activate_account",
+    description: "Activates user account with provided verification code.",
+  })
+  async activate_account(
+    @Arg("data", () => ActivateUserAccountInput) data: ActivateUserAccountInput,
+  ): Promise<Boolean> {
+    // check if user account already exists with provided email
+    const exists = await UserAccount.findOne({ where: { email: data.email } });
+    if (!exists) return true;
+
+    // skip for invalid activation code
+    if (!(await redisClient.isActivationCodeValid(exists.email, data.activation_code))) {
+      return true;
+    }
+
+    // activate user account
+    await UserAccount.update({ id: exists.id }, { account_activated_at: new DateTime() });
+    return true;
+  }
+}
+```
+
+3. Add Resolver to resolvers list. Edit `src/resolvers/index.ts` with following contents:
+
+```typescript
+import type { NonEmptyArray } from "type-graphql";
+import { HealthResolver } from "./HealthResolver";
+import { CreateNewAccountResolver } from "./accounts/CreateNewAccountResolver";
+import { ActivateUserAccountResolver } from "./accounts/ActivateUserAccountResolver";
+
+export const AllResolvers: NonEmptyArray<Function> = [
+  HealthResolver,
+  CreateNewAccountResolver,
+  ActivateUserAccountResolver, // <- add this line.
+];
+```

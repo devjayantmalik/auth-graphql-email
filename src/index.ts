@@ -26,6 +26,6 @@ const main = async (): Promise<void> => {
   // Send scheduled emails regularly. You can create seperate processes incase, you need to scale horizontally.
   setInterval(async () => {
     await sendScheduledEmails();
-  }, 5000);
+  }, 10_000);
 };
 main().catch(console.error);

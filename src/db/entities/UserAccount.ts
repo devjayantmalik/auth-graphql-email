@@ -29,6 +29,12 @@ export class UserAccount extends BaseEntity {
   @Column({ name: "account_activated_at", type: "timestamp", nullable: true, default: null })
   account_activated_at?: Date;
 
+  // @Column({ name: "auth_token", length: 10, default: "" })
+  // auth_token: string;
+
+  // @Column({ name: "auth_token_expires_at", type: "timestamp", default: "now()" })
+  // auth_token_expires_at: Date;
+
   @Field(() => Date)
   @CreateDateColumn({ name: "created_at" })
   created_at: Date;
