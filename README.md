@@ -1006,6 +1006,139 @@ export const AllResolvers: NonEmptyArray<Function> = [
 
 ##### 4. Reset Password (Send Reset Password Email)
 
+1. Create a new file `src/resolvers/accounts/dto/ResetPasswordInput.ts` with below contents:
+
+```typescript
+import { IsEmail } from "class-validator";
+import { Field, InputType } from "type-graphql";
+
+@InputType()
+export class ResetPasswordInput {
+  @IsEmail({}, { message: "Invalid email provided." })
+  @Field(() => String, { name: "email" })
+  email: string;
+}
+```
+
+2. Edit `src/common/Random.ts` with below contents:
+
+```typescript
+import { customAlphabet } from "nanoid";
+
+const alphabets = "ABCDEFGHIJLKMNOPQRSTUVWXYZ";
+const numbers = "0123456789";
+const authTokenCode = customAlphabet(alphabets.toUpperCase() + alphabets.toLowerCase() + numbers);
+const numericCode = customAlphabet(numbers);
+
+export const Random = {
+  createAuthToken(): string {
+    return authTokenCode(10);
+  },
+
+  createNumericCode(size: number = 6) {
+    return numericCode(size);
+  },
+};
+```
+
+3. Edit `src/db/redis.ts` with below contents:
+
+```typescript
+import Redis from "ioredis";
+import { environ } from "../common/env";
+import { customAlphabet } from "nanoid";
+import { Random } from "../common/Random";
+
+const random_code = customAlphabet("0123456789", 6);
+
+export class CustomRedis extends Redis {
+  public async createActivationCode(email: string): Promise<string> {
+    const code = random_code();
+    await this.set(`account_activation_${email}`, code, "EX", 60 * 5); // expires after 5 minutes
+
+    return code;
+  }
+
+  public async isActivationCodeValid(email: string, code: string): Promise<boolean> {
+    const found_code = await this.get(`account_activation_${email}`);
+    if (!found_code || found_code !== code) return false;
+
+    // expire current code
+    await this.del(`account_activation_${email}`);
+
+    return true;
+  }
+
+  public async createResetPasswordCode(email: string): Promise<string> {
+    const code = Random.createNumericCode();
+    await this.set(`passcode_reset_${email}`, code, "EX", 60 * 5);
+
+    return code;
+  }
+
+  public async isResetPasswordCodeValid(email: string, code: string): Promise<boolean> {
+    const found_code = await this.get(`passcode_reset_${email}`);
+    if (!found_code || found_code !== code) return false;
+
+    // expire current code
+    await this.del(`passcode_reset_${email}`);
+    return true;
+  }
+}
+
+export const redisClient = new CustomRedis(environ.REDIS_URL);
+```
+
+4. Create new file `src/resolvers/accounts/ResetPasswordResolver.ts` with below contents:
+
+```typescript
+import { Arg, Mutation, Resolver } from "type-graphql";
+import { EmailQueue } from "../../db/entities/EmailQueue";
+import { UserAccount } from "../../db/entities/UserAccount";
+import { redisClient } from "../../db/redis";
+import { ResetPasswordInput } from "./dto/ResetPasswordInput";
+
+@Resolver()
+export class ResetPasswordResolver {
+  @Mutation(() => Boolean, {
+    name: "reset_password",
+    description: "Sends a reset password email with verification code.",
+  })
+  async reset_password(
+    @Arg("data", () => ResetPasswordInput) data: ResetPasswordInput,
+  ): Promise<Boolean> {
+    // check if user account already exists with provided email
+    const exists = await UserAccount.findOne({ where: { email: data.email } });
+    if (!exists) return true;
+
+    // generate password reset code
+    const code = await redisClient.createResetPasswordCode(exists.email);
+    await EmailQueue.schedulePasswordResetEmail(exists, code);
+
+    return true;
+  }
+}
+```
+
+5. Edit `src/resolvers/index.ts` with below contents:
+
+```typescript
+import type { NonEmptyArray } from "type-graphql";
+import { HealthResolver } from "./HealthResolver";
+import { CreateNewAccountResolver } from "./accounts/CreateNewAccountResolver";
+import { ActivateUserAccountResolver } from "./accounts/ActivateUserAccountResolver";
+import { AuthenticateResolver } from "./accounts/AuthenticateResolver";
+import { ResetPasswordResolver } from "./accounts/ResetPasswordResolver";
+
+export const AllResolvers: NonEmptyArray<Function> = [
+  HealthResolver,
+  CreateNewAccountResolver,
+  ActivateUserAccountResolver,
+  AuthenticateResolver,
+  ResetPasswordResolver,
+];
+```
+
 ##### 5. Update Password (Updates existing password with new one.)
 
 ##### 6. Get Current Logged in User

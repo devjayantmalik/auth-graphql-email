@@ -88,8 +88,24 @@ export class EmailQueue extends BaseEntity {
       from: environ.SMTP_FROM,
       to: [account.email],
       subject: "Account Activation Email",
-      html: `<h1>Welcome ${account.full_name}.<h1><br/><p>Your account activation code is: ${code}`,
+      html: `<h1>Welcome ${account.full_name}.</h1><br/><p>Your account activation code is: ${code}</p>`,
       text_content: `Welcome ${account.full_name}. Your account activation code is: ${code}`,
+      attachments: [],
+    }).save();
+
+    return created;
+  }
+
+  public static async schedulePasswordResetEmail(
+    account: UserAccount,
+    code: string,
+  ): Promise<EmailQueue> {
+    const created = await EmailQueue.create({
+      from: environ.SMTP_FROM,
+      to: [account.email],
+      subject: "Reset Password Email",
+      html: `<h1>Hello ${account.full_name}.</h1><br/><p>Your password reset code is: ${code}</p>`,
+      text_content: `Welcome ${account.full_name}. Your password reset code is: ${code}`,
       attachments: [],
     }).save();
 
